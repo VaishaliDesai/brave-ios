@@ -285,28 +285,23 @@ class NTPDownloader {
             switch type {
             case .sponsor:
                 let sponsor = try JSONDecoder().decode(NTPSponsor.self, from: metadata)
-                                
-                let logo = sponsor.logo.map {
-                    NTPLogo(
-                        imageUrl: downloadsFolderURL.appendingPathComponent($0.imageUrl).path,
-                        alt: $0.alt,
-                        companyName: $0.companyName,
-                        destinationUrl: $0.destinationUrl)
+
+                let campaigns = sponsor.campaigns.map {
+                    NTPCampaign(wallpapers: mapNTPWallpapersToFullPath($0.wallpapers, basePath: downloadsFolderURL),
+                                logo: mapNTPLogoToFullPath($0.logo, basePath: downloadsFolderURL))
                 }
-                
-                let wallpapers = mapNTPBackgroundsToFullPath(sponsor.wallpapers, basePath: downloadsFolderURL)
-                
-                return NTPSponsor(wallpapers: wallpapers, logo: logo)
+
+                return NTPSponsor(schemaVersion: 1, campaigns: campaigns)
             case .superReferral(let code):
                 let customTheme = try JSONDecoder().decode(CustomTheme.self, from: metadata)
                 
-                let wallpapers = mapNTPBackgroundsToFullPath(customTheme.wallpapers, basePath: downloadsFolderURL)
+                let wallpapers = mapNTPWallpapersToFullPath(customTheme.wallpapers, basePath: downloadsFolderURL)
                 
                 // At the moment we do not anything with logo for super referrals.
                 let logo: NTPLogo? = nil
-                
-                return CustomTheme(themeName: customTheme.themeName, wallpapers: wallpapers, logo: logo,
-                                   topSites: customTheme.topSites, refCode: code)
+
+                return CustomTheme(themeName: customTheme.themeName, wallpapers: wallpapers,
+                                   logo: logo, topSites: customTheme.topSites, refCode: code)
             }
         } catch {
             logger.error(error)
@@ -315,15 +310,22 @@ class NTPDownloader {
         return nil
     }
     
-    private func mapNTPBackgroundsToFullPath(_ backgrounds: [NTPBackground],
-                                             basePath: URL) -> [NTPBackground] {
-        backgrounds.map {
-            NTPBackground(imageUrl: basePath.appendingPathComponent($0.imageUrl).path,
-                          focalPoint: $0.focalPoint,
-                          creativeInstanceId: $0.creativeInstanceId)
+    private func mapNTPWallpapersToFullPath(_ wallpapers: [NTPWallpaper], basePath: URL) -> [NTPWallpaper] {
+        wallpapers.map {
+            NTPWallpaper(imageUrl: basePath.appendingPathComponent($0.imageUrl).path, logo: $0.logo,
+                         focalPoint: $0.focalPoint, creativeInstanceId: $0.creativeInstanceId)
         }
     }
-    
+
+    private func mapNTPLogoToFullPath(_ logo: NTPLogo?, basePath: URL) -> NTPLogo? {
+        guard let logo = logo else {
+          return nil
+        }
+
+        return NTPLogo(imageUrl: basePath.appendingPathComponent(logo.imageUrl).path, alt: logo.alt,
+                       companyName: logo.companyName, destinationUrl: logo.destinationUrl)
+    }
+
     private func getETag(type: ResourceType) -> String? {
         do {
             let etagFileURL = try self.ntpETagFileURL(type: type)
@@ -465,18 +467,18 @@ class NTPDownloader {
             
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
             
-            func decodeAndSave(type: ResourceType) throws -> NTPBackgroundProtocol {
+            func decodeAndSave(type: ResourceType) throws -> (wallpapers: [NTPWallpaper], logos: [NTPLogo]) {
                 switch type {
                 case .sponsor:
                     let item = try JSONDecoder().decode(NTPSponsor.self, from: data)
                     let metadataFileURL = directory.appendingPathComponent(type.resourceName)
                     try JSONEncoder().encode(item).write(to: metadataFileURL, options: .atomic)
-                    return item
+                    return (item.campaigns.flatMap(\.wallpapers), item.campaigns.compactMap(\.logo))
                 case .superReferral:
                     let item = try JSONDecoder().decode(CustomTheme.self, from: data)
                     let metadataFileURL = directory.appendingPathComponent(type.resourceName)
                     try JSONEncoder().encode(item).write(to: metadataFileURL, options: .atomic)
-                    return item
+                    return (item.wallpapers, [item.logo].compactMap { $0 })
                 }
             }
             
@@ -484,12 +486,10 @@ class NTPDownloader {
             
             var imagesToDownload = [String]()
             
-            if let logo = item.logo {
-                imagesToDownload.append(logo.imageUrl)
-            }
-            
+            imagesToDownload.append(contentsOf: item.logos.map { $0.imageUrl })
             imagesToDownload.append(contentsOf: item.wallpapers.map { $0.imageUrl })
-            
+            imagesToDownload.append(contentsOf: item.wallpapers.compactMap { $0.logo?.imageUrl })
+
             for itemURL in imagesToDownload {
                 group.enter()
                 self.download(type: type, path: itemURL, etag: nil) { data, _, err in
