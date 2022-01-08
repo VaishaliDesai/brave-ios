@@ -2017,6 +2017,10 @@ extension BrowserViewController: TabDelegate {
         tab.addContentScript(BraveTalkScriptHandler(tab: tab,
                                                         rewards: rewards),
                              name: BraveTalkScriptHandler.name(), sandboxed: false)
+        
+        tab.addContentScript(BraveSkusScriptHandler(tab: tab),
+                             name: BraveSkusScriptHandler.name(),
+                             sandboxed: false)
 
         if YubiKitDeviceCapabilities.supportsMFIAccessoryKey {
             tab.addContentScript(U2FExtensions(tab: tab), name: U2FExtensions.name(), sandboxed: false)
